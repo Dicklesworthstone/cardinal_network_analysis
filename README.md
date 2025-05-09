@@ -2,7 +2,7 @@
 
 This project provides an interactive visualization and analysis of the Vatican's cardinal network using complex network science techniques. The approach is based on a study by Leonardo Rizzo, Beppe Soda, and Alessandro Iorio which demonstrated how network analysis can predict papal elections by modeling the ecclesiastical power structure.
 
-**GitHub Repository**: [https://github.com/Dicklesworthstone/cardinal_network_analysis/tree/main](https://github.com/Dicklesworthstone/cardinal_network_analysis/tree/main)
+**GitHub Repository**: [https://github.com/Dicklesworthstone/cardinal_network_analysis](https://github.com/Dicklesworthstone/cardinal_network_analysis)
 
 ## Overview
 

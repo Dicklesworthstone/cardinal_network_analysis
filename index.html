@@ -1,0 +1,560 @@
+import React, { useState, useEffect, useRef } from 'react';
+import * as d3 from 'd3';
+
+const CardinalNetworkAnalysis = () => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [graphData, setGraphData] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [selectedCardinal, setSelectedCardinal] = useState(null);
+  const [pyodideReady, setPyodideReady] = useState(false);
+  const [pyodide, setPyodide] = useState(null);
+  const svgRef = useRef(null);
+  const graphContainerRef = useRef(null);
+  
+  // For simulation control
+  const [simulation, setSimulation] = useState(null);
+
+  // Generate fake cardinal data
+  const generateFakeCardinalData = async (pyodideInstance) => {
+    try {
+      // Define and run Python code to generate network data
+      const pythonCode = `
+import random
+import networkx as nx
+import json
+
+# Set random seed for reproducibility
+random.seed(42)
+
+# Create ideological groups
+ideologies = ["Liberal", "Soft Liberal", "Moderate", "Soft Conservative", "Conservative", "Non-voting"]
+ideology_colors = {
+    "Liberal": "#0066cc",
+    "Soft Liberal": "#66a3ff",
+    "Moderate": "#b3b3b3",
+    "Soft Conservative": "#ff8080",
+    "Conservative": "#cc0000",
+    "Non-voting": "#f2f2f2"
+}
+
+# Names for our cardinals (fictional)
+first_names = [
+    "Angelo", "Beppe", "Carlo", "Domenico", "Enrico", "Francesco", "Giovanni", "Luigi",
+    "Marco", "Paolo", "Roberto", "Stefano", "Tommaso", "Vittorio", "Alessandro",
+    "Antonio", "Benedetto", "Daniele", "Emanuele", "Filippo", "Giancarlo", "Lorenzo",
+    "Matteo", "Nicola", "Pietro", "Raffaele", "Salvatore", "Umberto", "Vincenzo"
+]
+
+last_names = [
+    "Rossi", "Bianchi", "Marino", "Costa", "Greco", "Romano", "Serra", "Conti",
+    "Esposito", "Ricci", "Bruno", "Gallo", "Mancini", "Leone", "Lombardi",
+    "Moretti", "Barbieri", "Ferrari", "Martini", "Santoro", "Mariani", "Rinaldi",
+    "Caruso", "Ferri", "Vitale", "Parisi", "Villa", "Basile", "Pellegrini"
+]
+
+# Generate cardinals
+num_cardinals = 60
+cardinals = []
+
+# Ensure we have one who will be the "elected Pope"
+pope_index = random.randint(0, num_cardinals - 1)
+
+for i in range(num_cardinals):
+    first = random.choice(first_names)
+    last = random.choice(last_names)
+    # Create a unique initial for first name
+    initial = first[0] + "."
+    
+    # Assign ideologies with some bias
+    if i == pope_index:
+        # The future pope is more likely to be moderate
+        ideology = random.choices(ideologies[:5], weights=[0.15, 0.25, 0.3, 0.2, 0.1])[0]
+    else:
+        ideology = random.choice(ideologies[:5])
+    
+    cardinal = {
+        "id": i,
+        "name": f"{initial} {last}",
+        "full_name": f"{first} {last}",
+        "ideology": ideology,
+        "color": ideology_colors[ideology],
+        "age": random.randint(55, 85),
+        "country": random.choice(["Italy", "France", "Spain", "Germany", "USA", "Brazil", "Argentina", "Nigeria", "Philippines", "Poland"])
+    }
+    
+    cardinals.append(cardinal)
+
+# Create graph
+G = nx.Graph()
+
+# Add nodes
+for cardinal in cardinals:
+    G.add_node(cardinal["id"], **cardinal)
+
+# Add edges (connections between cardinals)
+# 1. Official co-memberships
+num_committees = 15
+committees = []
+for i in range(num_committees):
+    committee_size = random.randint(3, 8)
+    committee_members = random.sample(range(num_cardinals), committee_size)
+    committees.append(committee_members)
+    
+    # Create connections between all members of the committee
+    for j in range(len(committee_members)):
+        for k in range(j+1, len(committee_members)):
+            if G.has_edge(committee_members[j], committee_members[k]):
+                # Increment weight if edge already exists
+                G[committee_members[j]][committee_members[k]]['weight'] += 1
+            else:
+                G.add_edge(committee_members[j], committee_members[k], type="co-membership", weight=1)
+
+# 2. Lines of episcopal consecration
+for i in range(num_cardinals):
+    # Each cardinal might have been consecrated by 0-2 other cardinals
+    num_consecrators = random.randint(0, 2)
+    if num_consecrators > 0:
+        consecrators = random.sample([j for j in range(num_cardinals) if j != i], num_consecrators)
+        for cons in consecrators:
+            if G.has_edge(i, cons):
+                G[i][cons]['weight'] += 2  # Stronger connection
+            else:
+                G.add_edge(i, cons, type="consecration", weight=2)
+
+# 3. Informal relationships
+# Cardinals from the same country are more likely to have connections
+countries = set(cardinal["country"] for cardinal in cardinals)
+for country in countries:
+    country_cardinals = [c["id"] for c in cardinals if c["country"] == country]
+    if len(country_cardinals) > 1:
+        for j in range(len(country_cardinals)):
+            for k in range(j+1, len(country_cardinals)):
+                if random.random() < 0.7:  # 70% chance of connection between same country
+                    if G.has_edge(country_cardinals[j], country_cardinals[k]):
+                        G[country_cardinals[j]][country_cardinals[k]]['weight'] += 1
+                    else:
+                        G.add_edge(country_cardinals[j], country_cardinals[k], type="informal", weight=1)
+
+# Add some random connections
+for _ in range(num_cardinals * 2):
+    a, b = random.sample(range(num_cardinals), 2)
+    if a != b and not G.has_edge(a, b):
+        G.add_edge(a, b, type="informal", weight=1)
+
+# Calculate network metrics
+# 1. Eigenvector centrality for status
+eigenvector_centrality = nx.eigenvector_centrality(G, weight='weight')
+# 2. Betweenness centrality for information control
+betweenness_centrality = nx.betweenness_centrality(G, weight='weight')
+# 3. Degree centrality for basic connectivity
+degree_centrality = nx.degree_centrality(G)
+
+# Create a composite index for coalition building capability
+coalition_index = {}
+for node in G.nodes():
+    # Weighted combination of centrality measures
+    coalition_index[node] = (
+        0.4 * eigenvector_centrality[node] + 
+        0.4 * betweenness_centrality[node] + 
+        0.2 * degree_centrality[node]
+    )
+
+# Adjust for age (younger cardinals have slight advantage in composite index)
+age_adjusted_index = {}
+max_age = max(G.nodes[node]['age'] for node in G.nodes())
+min_age = min(G.nodes[node]['age'] for node in G.nodes())
+age_range = max_age - min_age
+
+for node in G.nodes():
+    age_factor = 1 - 0.2 * (G.nodes[node]['age'] - min_age) / age_range if age_range > 0 else 1
+    age_adjusted_index[node] = coalition_index[node] * age_factor
+
+# Store metrics in node attributes
+for node in G.nodes():
+    G.nodes[node]['eigenvector_centrality'] = eigenvector_centrality[node]
+    G.nodes[node]['betweenness_centrality'] = betweenness_centrality[node]
+    G.nodes[node]['degree_centrality'] = degree_centrality[node]
+    G.nodes[node]['coalition_index'] = coalition_index[node]
+    G.nodes[node]['age_adjusted_index'] = age_adjusted_index[node]
+    
+    # Scale node size by eigenvector centrality for visualization
+    G.nodes[node]['size'] = 5 + 20 * eigenvector_centrality[node]
+
+# Find top cardinals by each metric
+top_by_eigenvector = sorted(eigenvector_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+top_by_betweenness = sorted(betweenness_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+top_by_coalition = sorted(coalition_index.items(), key=lambda x: x[1], reverse=True)[:10]
+top_by_adjusted = sorted(age_adjusted_index.items(), key=lambda x: x[1], reverse=True)[:10]
+
+# Reformat for display
+top_cardinals = {
+    'eigenvector': [{'id': id, 'name': G.nodes[id]['name'], 'value': round(value, 4)} for id, value in top_by_eigenvector],
+    'betweenness': [{'id': id, 'name': G.nodes[id]['name'], 'value': round(value, 4)} for id, value in top_by_betweenness],
+    'coalition': [{'id': id, 'name': G.nodes[id]['name'], 'value': round(value, 4)} for id, value in top_by_coalition],
+    'age_adjusted': [{'id': id, 'name': G.nodes[id]['name'], 'value': round(value, 4)} for id, value in top_by_adjusted]
+}
+
+# Make pope the top by eigenvector
+actual_pope_id = top_by_eigenvector[0][0]
+G.nodes[actual_pope_id]['is_pope'] = True
+
+# For visualization in JavaScript
+nodes_data = []
+for node in G.nodes():
+    node_data = G.nodes[node].copy()
+    node_data['id'] = node
+    nodes_data.append(node_data)
+
+edges_data = []
+for u, v, data in G.edges(data=True):
+    edge_data = {
+        'source': u,
+        'target': v,
+        'weight': data.get('weight', 1),
+        'type': data.get('type', 'other')
+    }
+    edges_data.append(edge_data)
+
+output = {
+    'nodes': nodes_data,
+    'links': edges_data,
+    'metrics': {
+        'top_cardinals': top_cardinals,
+        'ideologies': [
+            {'name': 'Liberal', 'color': ideology_colors['Liberal']},
+            {'name': 'Soft Liberal', 'color': ideology_colors['Soft Liberal']},
+            {'name': 'Moderate', 'color': ideology_colors['Moderate']},
+            {'name': 'Soft Conservative', 'color': ideology_colors['Soft Conservative']},
+            {'name': 'Conservative', 'color': ideology_colors['Conservative']},
+            {'name': 'Non-voting', 'color': ideology_colors['Non-voting']}
+        ]
+    }
+}
+
+output_json = json.dumps(output)
+      `;
+
+      // Execute the Python code
+      await pyodideInstance.runPythonAsync(pythonCode);
+      const result = pyodideInstance.globals.get('output_json');
+      const data = JSON.parse(result);
+      
+      setGraphData({
+        nodes: data.nodes,
+        links: data.links
+      });
+      
+      setMetrics(data.metrics);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error generating data:', error);
+      setIsLoading(false);
+    }
+  };
+
+  // Initialize Pyodide
+  useEffect(() => {
+    const loadPyodide = async () => {
+      try {
+        const pyodideInstance = await window.loadPyodide({
+          indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.0/full/"
+        });
+        
+        // Install networkx
+        await pyodideInstance.loadPackagesFromImports("import networkx as nx");
+        
+        setPyodide(pyodideInstance);
+        setPyodideReady(true);
+      } catch (error) {
+        console.error('Error loading Pyodide:', error);
+        setIsLoading(false);
+      }
+    };
+
+    loadPyodide();
+  }, []);
+
+  // Generate data once Pyodide is ready
+  useEffect(() => {
+    if (pyodideReady && pyodide) {
+      generateFakeCardinalData(pyodide);
+    }
+  }, [pyodideReady, pyodide]);
+
+  // Create the force-directed graph using D3 once we have data
+  useEffect(() => {
+    if (!graphData || !svgRef.current || !graphContainerRef.current) return;
+    
+    // Clear previous graph
+    d3.select(svgRef.current).selectAll("*").remove();
+    
+    const width = graphContainerRef.current.clientWidth;
+    const height = graphContainerRef.current.clientHeight;
+    
+    // Create SVG element
+    const svg = d3.select(svgRef.current)
+      .attr("width", width)
+      .attr("height", height)
+      .attr("viewBox", [0, 0, width, height]);
+    
+    // Create the force simulation
+    const sim = d3.forceSimulation(graphData.nodes)
+      .force("link", d3.forceLink(graphData.links)
+        .id(d => d.id)
+        .distance(80)
+        .strength(0.5))
+      .force("charge", d3.forceManyBody().strength(-300))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(d => d.size * 1.5));
+    
+    // Create container group with zoom/pan functionality
+    const g = svg.append("g");
+    
+    svg.call(d3.zoom()
+      .extent([[0, 0], [width, height]])
+      .scaleExtent([0.1, 8])
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      }));
+    
+    // Create links
+    const link = g.append("g")
+      .attr("stroke", "#999")
+      .attr("stroke-opacity", 0.6)
+      .selectAll("line")
+      .data(graphData.links)
+      .join("line")
+      .attr("stroke-width", d => Math.sqrt(d.weight) * 0.5);
+    
+    // Create node groups
+    const node = g.append("g")
+      .selectAll(".node")
+      .data(graphData.nodes)
+      .join("g")
+      .attr("class", "node")
+      .call(d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended))
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        setSelectedCardinal(d);
+      });
+    
+    // Add circles to node groups
+    node.append("circle")
+      .attr("r", d => d.size)
+      .attr("fill", d => d.color)
+      .attr("stroke", d => d.is_pope ? "gold" : "#fff")
+      .attr("stroke-width", d => d.is_pope ? 3 : 1);
+    
+    // Add labels to nodes
+    node.append("text")
+      .attr("dx", 0)
+      .attr("dy", d => d.size + 10)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "8px")
+      .text(d => d.name)
+      .attr("fill", "#333")
+      .attr("pointer-events", "none")
+      .style("opacity", 0.8);
+    
+    // Update positions on simulation tick
+    sim.on("tick", () => {
+      link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+      
+      node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+    
+    // Drag functions
+    function dragstarted(event, d) {
+      if (!event.active) sim.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+    
+    function dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+    
+    function dragended(event, d) {
+      if (!event.active) sim.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+    
+    // Clear selection when clicking on empty space
+    svg.on("click", () => {
+      setSelectedCardinal(null);
+    });
+    
+    // Store simulation for later access
+    setSimulation(sim);
+    
+    // Cleanup function
+    return () => {
+      sim.stop();
+    };
+  }, [graphData]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="text-xl font-semibold mb-4">Loading Network Analysis...</div>
+          <div className="text-sm text-gray-600">
+            Initializing Pyodide and generating network data. This may take a moment.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-screen">
+      <div className="p-4 bg-gray-100 border-b border-gray-300">
+        <h1 className="text-2xl font-bold">Cardinal Network Analysis</h1>
+        <p className="text-sm text-gray-700">
+          A simulation of using network science to analyze the ecclesiastical network structure
+        </p>
+      </div>
+      
+      <div className="flex flex-1 overflow-hidden">
+        <div className="w-2/3 h-full relative" ref={graphContainerRef}>
+          <svg ref={svgRef} className="w-full h-full"></svg>
+        </div>
+        
+        <div className="w-1/3 h-full overflow-y-auto p-4 bg-gray-50 border-l border-gray-300">
+          {selectedCardinal ? (
+            <div>
+              <h2 className="text-xl font-bold mb-2">{selectedCardinal.full_name}</h2>
+              <div className="p-3 bg-white rounded-lg shadow-sm mb-4">
+                <div className="flex items-center mb-2">
+                  <div 
+                    className="w-4 h-4 rounded-full mr-2" 
+                    style={{ backgroundColor: selectedCardinal.color }}
+                  ></div>
+                  <span>{selectedCardinal.ideology}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>Age:</div>
+                  <div>{selectedCardinal.age}</div>
+                  <div>Country:</div>
+                  <div>{selectedCardinal.country}</div>
+                </div>
+              </div>
+              
+              <h3 className="font-semibold mb-2">Network Metrics</h3>
+              <div className="bg-white rounded-lg shadow-sm p-3 mb-4">
+                <div className="grid grid-cols-2 gap-1 text-sm">
+                  <div>Status (Eigenvector):</div>
+                  <div>{selectedCardinal.eigenvector_centrality.toFixed(4)}</div>
+                  <div>Info Control (Betweenness):</div>
+                  <div>{selectedCardinal.betweenness_centrality.toFixed(4)}</div>
+                  <div>Coalition Building:</div>
+                  <div>{selectedCardinal.coalition_index.toFixed(4)}</div>
+                  <div>Age-Adjusted Index:</div>
+                  <div>{selectedCardinal.age_adjusted_index.toFixed(4)}</div>
+                </div>
+              </div>
+              
+              <button 
+                className="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-sm"
+                onClick={() => setSelectedCardinal(null)}
+              >
+                Close Details
+              </button>
+            </div>
+          ) : metrics ? (
+            <div>
+              <h2 className="text-xl font-bold mb-4">Network Analysis Results</h2>
+              
+              <div className="mb-4">
+                <h3 className="font-semibold mb-2">Legend</h3>
+                <div className="bg-white rounded-lg shadow-sm p-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    {metrics.ideologies && metrics.ideologies.map((ideology) => (
+                      <div key={ideology.name} className="flex items-center">
+                        <div 
+                          className="w-4 h-4 rounded-full mr-2" 
+                          style={{ backgroundColor: ideology.color }}
+                        ></div>
+                        <span className="text-sm">{ideology.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              {metrics.top_cardinals && (
+                <>
+                  <div className="mb-4">
+                    <h3 className="font-semibold mb-2">Top by Status (Eigenvector Centrality)</h3>
+                    <div className="bg-white rounded-lg shadow-sm p-3">
+                      <div className="space-y-1">
+                        {metrics.top_cardinals.eigenvector.map((cardinal, index) => (
+                          <div key={cardinal.id} className="text-sm flex justify-between">
+                            <span>{index + 1}. {cardinal.name}</span>
+                            <span>{cardinal.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <h3 className="font-semibold mb-2">Top by Information Control (Betweenness)</h3>
+                    <div className="bg-white rounded-lg shadow-sm p-3">
+                      <div className="space-y-1">
+                        {metrics.top_cardinals.betweenness.map((cardinal, index) => (
+                          <div key={cardinal.id} className="text-sm flex justify-between">
+                            <span>{index + 1}. {cardinal.name}</span>
+                            <span>{cardinal.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              
+              <div className="mb-4">
+                <h3 className="font-semibold mb-2">Methodology</h3>
+                <div className="bg-white rounded-lg shadow-sm p-3 text-sm">
+                  <p className="mb-2">This simulation uses network science to analyze the ecclesiastical network structure:</p>
+                  <ol className="list-decimal pl-5 space-y-1">
+                    <li>Built multilevel network model with 3 relationships: official co-memberships, lines of episcopal consecration, and informal connections</li>
+                    <li>Analyzed node prominence using eigenvector centrality (status), betweenness centrality (information control), and a composite index (coalition building)</li>
+                    <li>Adjusted rankings by considering age</li>
+                  </ol>
+                  <p className="mt-2 italic">Note: This is a simulation using randomly generated data for educational purposes.</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4">
+              <p>Loading metrics data...</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Add script to load Pyodide
+const addPyodideScript = () => {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/pyodide/v0.24.0/full/pyodide.js';
+  document.head.appendChild(script);
+};
+
+// Run on component mount
+addPyodideScript();
+
+export default CardinalNetworkAnalysis;
